@@ -3,6 +3,18 @@
 #define __USE_GNU
 #include <dlfcn.h>
 #include <stddef.h>
+
+#ifdef __KERNEL__
+#	include<linux/printk.h>
+#	define INTERNAL_PRINT printk
+#	define STD_PREFIX KERN_INFO
+#	define CONT_PREFIX KERN_CONT
+#else
+#	define INTERNAL_PRINT printf
+#	define STD_PREFIX 
+#	define CONT_PREFIX
+#endif // __KERNEL__
+
 const char *getCaller(void) {
     void *callstack[4];
     const int maxFrames = sizeof(callstack) / sizeof(callstack[0]);
@@ -12,10 +24,8 @@ const char *getCaller(void) {
     backtrace(callstack, maxFrames);
 
     if (dladdr(callstack[3], &info) && info.dli_sname != NULL) {
-        // printf("I was called from: %s\n", info.dli_sname);
         return info.dli_sname;
     } else {
-        // printf("Unable to determine calling function\n");
         return "<?>";
     }
 }
@@ -47,13 +57,13 @@ const char *escape_sequence[256] = {
 
 size_t strlen_probe(char *str) {
 	size_t usuable_memory = malloc_usable_size(str);
-	printf("the usuable size is %ld\n", usuable_memory);
+	INTERNAL_PRINT(STD_PREFIX "the usuable size is %ld\n", usuable_memory);
 	size_t iter = 0;
 	while(str[iter]) {
 		if(str[iter] == '\n') {
-			printf("strlen_probe: charcter \\n, index: %ld\n", iter);
+			INTERNAL_PRINT(CONT_PREFIX "strlen_probe: charcter \\n, index: %ld\n", iter);
 		} else {
-			printf("strlen_probe: charcter %c (%u), index: %ld\n", str[iter], (unsigned char)str[iter], iter);
+			INTERNAL_PRINT(CONT_PREFIX "strlen_probe: charcter %c (%u), index: %ld\n", str[iter], (unsigned char)str[iter], iter);
 		}
 		iter++;
 	}
@@ -62,43 +72,43 @@ size_t strlen_probe(char *str) {
 
 void dbgmem(void *ptr) {
     if (ptr == NULL) {
-        printf("pointer is NULL\n");
+        INTERNAL_PRINT(STD_PREFIX "pointer is NULL\n");
         return;
     }
 
     size_t length = malloc_usable_size(ptr);
     unsigned char *p = (unsigned char *)ptr;
-	printf("%p points to a usable region of size %ld \n[%p - %p]\n", 
+	INTERNAL_PRINT(STD_PREFIX "%p points to a usable region of size %ld \n[%p - %p]\n", 
 		ptr, length, ptr, ptr + length - 1);
 
-    printf("---------------------------------------------------------------\n");
+    INTERNAL_PRINT(CONT_PREFIX "---------------------------------------------------------------\n");
 
     for (size_t i = 0; i < length; i++) {
 		if(i % 16 == 0) {
-			printf("%p: ", p + i);
+			INTERNAL_PRINT(CONT_PREFIX "%p: ", p + i);
 		}
-        printf("%02X ", p[i]);
+        INTERNAL_PRINT(CONT_PREFIX "%02X ", p[i]);
         if ((i + 1) % 16 == 0) {
-            printf("\n");
+            INTERNAL_PRINT(CONT_PREFIX "\n");
         }
     }
-    printf("\n");
+    INTERNAL_PRINT(CONT_PREFIX "\n");
     
-    printf("---------------------------------------------------------------\n");
+    INTERNAL_PRINT(CONT_PREFIX "---------------------------------------------------------------\n");
 
     for (size_t i = 0; i < length; i++) {
 		if(i % 16 == 0) {
-			printf("%p: ", p + i);
+			INTERNAL_PRINT(CONT_PREFIX "%p: ", p + i);
 		}
 		if(escape_sequence[p[i]] == NULL) {
-        	printf("%c  ", p[i]);
+        	INTERNAL_PRINT(CONT_PREFIX "%c  ", p[i]);
 		} else {
-			printf("%s ", escape_sequence[p[i]]);
+			INTERNAL_PRINT(CONT_PREFIX "%s ", escape_sequence[p[i]]);
 		}
         if ((i + 1) % 16 == 0) {
-            printf("\n");
+            INTERNAL_PRINT(CONT_PREFIX "\n");
         }
     }
-    printf("\n");
+    INTERNAL_PRINT(CONT_PREFIX "\n");
 }
 

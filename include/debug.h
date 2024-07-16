@@ -9,6 +9,17 @@
 #define lengthof(array) (sizeof(array) / sizeof((array)[0]))
 #endif
 
+#ifdef __KERNEL__
+#	include<linux/printk.h>
+#	define INTERNAL_PRINT printk
+#	define STD_PREFIX KERN_INFO
+#	define CONT_PREFIX KERN_CONT
+#else
+#	define INTERNAL_PRINT printf
+#	define STD_PREFIX 
+#	define CONT_PREFIX
+#endif // __KERNEL__
+
 #ifdef DEBUG
 
 void dbgmem(void *ptr);
@@ -21,8 +32,8 @@ size_t strlen_probe(char *str);
 	})
 #define dbg(fmt, ...) \
     ({  \
-        printf("[\e[93mdebug\e[0m: %s @ %d in %s from %s] " fmt "\n", \
-        __FUNCTION__, __LINE__, __FILE__, getCaller() __VA_OPT__(, __VA_ARGS__)); \
+        INTERNAL_PRINT(STD_PREFIX "[\e[93mdebug\e[0m: %s @ %d in %s from %s] " fmt "\n", 	\
+        __FUNCTION__, __LINE__, __FILE__, getCaller() __VA_OPT__(, __VA_ARGS__)); 			\
     })
 #else
 #define dbg(fmt, ...)
@@ -53,11 +64,19 @@ size_t strlen_probe(char *str);
 	largest;		 																\
 })
 
-#define _dbgstr_convert_ptr_to_diff(x) 												\
-		_Generic((x),																\
-			char *: (str - x),														\
-			default: (x)															\
-		),
+#if defined(__STDC_VERSION__)
+#	if __STDC_VERSION__ >= 199901L
+// generic was only introduced in C11
+#	define _dbgstr_convert_ptr_to_diff(x) 											\
+			_Generic((x),															\
+				char *: (str - x),													\
+				default: (x)														\
+			),
+#	else
+#	define _dbgstr_convert_ptr_to_diff(x) (x) // feature disabled, assumed char *
+#	endif
+#endif
+
 
 #define dbgstr(strin, ...) ({														\
 		char *str = strin; 															\
@@ -94,30 +113,31 @@ size_t strlen_probe(char *str);
 				compensation = 0;													\
 			}																		\
 		}																			\
-       																				\
-       	while(index < usable_size) {									\
+																					\
+       	INTERNAL_PRINT(STD_PREFIX "");												\
+       	while(index < usable_size) {												\
         	if(_compareWithAnyofArray(index, idx)) {								\
         		if(str[index] == ' ') {												\
-        			printf("\e[43m");												\
+        			INTERNAL_PRINT(CONT_PREFIX "\e[43m");							\
         		} else {															\
-        			printf("\e[33m");												\
+        			INTERNAL_PRINT(CONT_PREFIX "\e[33m");							\
         		}																	\
         	}																		\
-        	if(str[index] == '\n') { printf("\\n"); }								\
-        	else if(str[index] == '\t') { printf("\\t"); }							\
-			else if(str[index] == '\b') { printf("\\b"); }							\
-			else if(str[index] == '\r') { printf("\\r"); }							\
-			else if(str[index] == '\e') { printf("\\e"); }							\
-			else if(str[index] == '\\') { printf("\\"); }							\
-			else if(str[index] == '\0') { printf("\\0"); }							\
-			else if(str[index] >= 128) { printf("??"); } 							\
-			else { printf("%c", str[index]); }										\
+        	if(str[index] == '\n') { INTERNAL_PRINT(CONT_PREFIX "\\n"); }			\
+        	else if(str[index] == '\t') { INTERNAL_PRINT(CONT_PREFIX "\\t"); }		\
+			else if(str[index] == '\b') { INTERNAL_PRINT(CONT_PREFIX "\\b"); }		\
+			else if(str[index] == '\r') { INTERNAL_PRINT(CONT_PREFIX "\\r"); }		\
+			else if(str[index] == '\e') { INTERNAL_PRINT(CONT_PREFIX "\\e"); }		\
+			else if(str[index] == '\\') { INTERNAL_PRINT(CONT_PREFIX "\\"); }		\
+			else if(str[index] == '\0') { INTERNAL_PRINT(CONT_PREFIX "\\0"); }		\
+			else if(str[index] >= 128) { INTERNAL_PRINT(CONT_PREFIX "??"); } 		\
+			else { INTERNAL_PRINT(CONT_PREFIX "%c", str[index]); }					\
 			if(_compareWithAnyofArray(index, idx)) {								\
-				printf("\e[0m");													\
+				INTERNAL_PRINT(CONT_PREFIX "\e[0m");								\
 			}																		\
 			index++;																\
         }																			\
-        printf("\n");																\
+        INTERNAL_PRINT(CONT_PREFIX "\n");											\
         for(int entry = 0; entry < arrow_count; entry++) {							\
        		for(size_t i = 0; i <= _maxFromArray(arrow_pos); i++) {					\
        			bool print_seperator = false;										\
@@ -127,16 +147,17 @@ size_t strlen_probe(char *str);
 	      				&& idx_printed[check_entry] == false;						\
 	      		}																	\
       			if(print_seperator) {												\
-      				printf("|");													\
+      				INTERNAL_PRINT(CONT_PREFIX"|");									\
       			} else {															\
-      				printf(" ");													\
+      				INTERNAL_PRINT(CONT_PREFIX" ");									\
       			}																	\
         	}																		\
-        	printf("\n");															\
+        	INTERNAL_PRINT(CONT_PREFIX"\n");										\
 																					\
        		for(size_t i = 0; i <= _maxFromArray(arrow_pos); i++) {					\
 	      		if(i == arrow_pos[entry]) {											\
-       				i += printf("%s [%ld/%ld]", varname[entry], idx[entry], len);	\
+       				i += INTERNAL_PRINT(CONT_PREFIX									\
+       					"%s [%ld/%ld]", varname[entry], idx[entry], len);			\
        				idx_printed[entry] = true;										\
 	      		}																	\
        			bool print_seperator = false;										\
@@ -146,12 +167,12 @@ size_t strlen_probe(char *str);
 	      				&& idx_printed[check_entry] == false;						\
 	      		}																	\
       			if(print_seperator) {												\
-      				printf("|");													\
+      				INTERNAL_PRINT(CONT_PREFIX "|");								\
       			} else {															\
-      				printf(" ");													\
+      				INTERNAL_PRINT(CONT_PREFIX" ");									\
       			}																	\
         	}																		\
-        	printf("\n");															\
+        	INTERNAL_PRINT(CONT_PREFIX "\n");										\
         }																			\
         																			\
 })

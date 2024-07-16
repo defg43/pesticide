@@ -22,8 +22,8 @@
 
 #ifdef DEBUG
 
-void dbgmem(void *ptr);
-size_t strlen_probe(char *str);
+static void dbgmem(void *ptr);
+static size_t strlen_probe(char *str);
 
 #define free(x) \
 	({ \
@@ -84,6 +84,9 @@ size_t strlen_probe(char *str);
 		const char *varname[] = { MAP(_stringify_comma, __VA_ARGS__) };				\
         size_t len = malloc_usable_size(str); 										\
         size_t usable_size = malloc_usable_size(str);								\
+		if(len == 0 && usable_size == 0 && lengthof(strin) != 1) {					\
+			len = lengthof(strin); usable_size = lengthof(strin);					\
+		} 																			\
         size_t index = 0;															\
         size_t arrow_index = 0;														\
         size_t arrow_pos[lengthof(idx)];											\
@@ -181,7 +184,7 @@ size_t strlen_probe(char *str);
 #define dbgstr(strin, ...)
 #endif
 
-const char *getCaller(void);
+static const char *getCaller(void);
 
 #ifdef __GNUC__
 #include <execinfo.h>
@@ -208,7 +211,7 @@ static const char *getCaller(void) {
 
     backtrace(callstack, maxFrames);
 
-    if (dladdr(callstack[3], &info) && info.dli_sname != NULL) {
+    if (dladdr(callstack[2], &info) && info.dli_sname != NULL) {
         return info.dli_sname;
     } else {
         return "<?>";

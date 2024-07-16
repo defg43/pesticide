@@ -224,8 +224,12 @@ static const char *getCaller(void) {
 
 #include <stddef.h>
 #include <stdio.h>
+#ifdef __KERNEL__
+#include <linux/slab.h>
+#define malloc_usable_size ksize
+#else 
 #include <malloc.h>
-
+#endif // not __KERNEL__
 static const char *escape_sequence[256] = {
 	['\a'] = "\\a",
 	['\b'] = "\\b",

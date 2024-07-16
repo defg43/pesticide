@@ -1,7 +1,6 @@
 #ifndef DEBUG_H
 #define DEBUG_H
 
-#include <malloc.h>
 #include "map.h"
 
 #ifndef lengthof

@@ -3,27 +3,30 @@
 
 #include "map.h"
 
+// platform independent section
+#ifdef DEBUG
+
+static const char *escape_sequence[256] = {
+	['\a'] = "\\a",
+	['\b'] = "\\b",
+	['\f'] = "\\f",
+	['\n'] = "\\n",
+	['\r'] = "\\r",
+	['\t'] = "\\t",
+	['\v'] = "\\v",
+	['\\'] = "\\\\",
+	['\''] = "\\'",
+	['\"'] = "\\\"",
+	['\?'] = "\\?",
+	['\0'] = "\\0",	
+	[128 ... 255] = "??",	
+};
+
 #ifndef lengthof
 #define lengthof(array) (sizeof(array) / sizeof((array)[0]))
 #endif
 
-#ifdef __KERNEL__
-#	include<linux/printk.h>
-#	define INTERNAL_PRINT printk
-#	define STD_PREFIX KERN_INFO
-#	define CONT_PREFIX KERN_CONT
-#else
-#	define INTERNAL_PRINT printf
-#	define STD_PREFIX 
-#	define CONT_PREFIX
-#endif // __KERNEL__
-
-#ifdef DEBUG
-
-static void dbgmem(void *ptr);
-static size_t strlen_probe(char *str);
-
-#define free(x) \
+#define dbgfree(x) \
 	({ \
 		dbg("freeing variable %s with the value %p", #x, x); \
 		free(x); \
@@ -33,12 +36,9 @@ static size_t strlen_probe(char *str);
         INTERNAL_PRINT(STD_PREFIX "[\e[93mdebug\e[0m: %s @ %d in %s from %s] " fmt "\n", 	\
         __FUNCTION__, __LINE__, __FILE__, getCaller() __VA_OPT__(, __VA_ARGS__)); 			\
     })
-#else
-#define dbg(fmt, ...)
-#define dbgmem(ptr) 
-#endif
 
-#ifdef DEBUG
+// utility macros, to be used internally 
+
 #define _compareWithAnyofArray(arg, arr) ({											\
 	bool matches = false;															\
 	for(size_t i = 0; i < lengthof(arr); i++) {										\
@@ -62,19 +62,18 @@ static size_t strlen_probe(char *str);
 	largest;		 																\
 })
 
-#if defined(__STDC_VERSION__)
-#	if __STDC_VERSION__ >= 199901L
-// generic was only introduced in C11
-#	define _dbgstr_convert_ptr_to_diff(x) 											\
-			_Generic((x),															\
-				char *: (str - x),													\
-				default: (x)														\
-			),
-#	else
-#	define _dbgstr_convert_ptr_to_diff(x) (x) // feature disabled, assumed char *
-#	endif
-#endif
-
+#	if defined(__STDC_VERSION__)
+#		if __STDC_VERSION__ >= 199901L
+		// generic was only introduced in C11
+#		define _dbgstr_convert_ptr_to_diff(x) 										\
+				_Generic((x),														\
+					char *: (str - x),												\
+					default: (x)													\
+				),
+#		else
+#		define _dbgstr_convert_ptr_to_diff(x) (x) // feature disabled, assumed char *
+#		endif // C11
+#	endif // __STDC_VERSION__
 
 #define dbgstr(strin, ...) ({														\
 		char *str = strin; 															\
@@ -179,71 +178,150 @@ static size_t strlen_probe(char *str);
 })
 
 #else
+
+// removing debug functions
+#define dbg(fmt, ...)
+#define dbgmem(ptr) 
 #define dbgstr(strin, ...)
-#endif
+#endif // DEBUG
 
-static const char *getCaller(void);
+#ifdef DEBUG
 
-#ifdef __GNUC__
-#include <execinfo.h>
-#define __USE_GNU
-#include <dlfcn.h>
-#include <stddef.h>
+// reduced feature set
+#if defined(PESTICIDE_CUSTOM)
 
-#ifdef __KERNEL__
+#	ifndef STD_PREFIX
+#		define STD_PREFIX
+#	endif // STD_PREFIX 
+
+#	ifndef CONT_PREFIX
+#		define CONT_PREFIX
+#	endif // CONT_PREFIX
+
+#	undef dbgmem
+#	define dbgmem(ptr) // disabled
+
+#	undef dbgstr
+#	define dbgstr(string, ...) // disabled
+
+static const char *getCaller(void) {
+	return "<unimplemented>";
+}
+
+// linux __KERNEL__
+#elif defined(__KERNEL__)
+
 #	include<linux/printk.h>
 #	define INTERNAL_PRINT printk
 #	define STD_PREFIX KERN_INFO
 #	define CONT_PREFIX KERN_CONT
-#else
+
+#	include <linux/slab.h>
+#	define malloc_usable_size ksize
+
+#	include <linux/module.h>
+#	include <linux/kernel.h>
+#	include <linux/init.h>
+#	include <linux/stacktrace.h>
+#	include <linux/kallsyms.h>
+#	include <linux/sched.h>
+#	include <linux/uaccess.h>
+
+#	define MAX_STACK_TRACE_DEPTH 4
+
+static const char *getCaller(void) {
+    struct stack_trace trace;
+    unsigned long entries[MAX_STACK_TRACE_DEPTH];
+    static char symbol[KSYM_SYMBOL_LEN];
+    unsigned long addr;
+    int i;
+
+    trace.nr_entries = 0;
+    trace.max_entries = MAX_STACK_TRACE_DEPTH;
+    trace.entries = entries;
+    trace.skip = 0;
+
+    save_stack_trace(&trace);
+
+    for (i = 0; i < trace.nr_entries; i++) {
+        if (i == 2) {  // Skip the first two entries
+            addr = trace.entries[i];
+            snprintf(symbol, sizeof(symbol), "%pS", (void *)addr);
+            return symbol;
+        }
+    }
+    return "<?>";
+}
+
+static void dbgmem(void *ptr) {
+    if (ptr == NULL) {
+        INTERNAL_PRINT(STD_PREFIX "pointer is NULL\n");
+        return;
+    }
+
+    size_t length = ksize(ptr);
+    unsigned char *p = (unsigned char *)ptr;
+	INTERNAL_PRINT(STD_PREFIX "%p points to a usable region of size %ld \n[%p - %p]\n", 
+		ptr, length, ptr, ptr + length - 1);
+
+    INTERNAL_PRINT(CONT_PREFIX "---------------------------------------------------------------\n");
+
+    for (size_t i = 0; i < length; i++) {
+		if(i % 16 == 0) {
+			INTERNAL_PRINT(CONT_PREFIX "%p: ", p + i);
+		}
+        INTERNAL_PRINT(CONT_PREFIX "%02X ", p[i]);
+        if ((i + 1) % 16 == 0) {
+            INTERNAL_PRINT(CONT_PREFIX "\n");
+        }
+    }
+    INTERNAL_PRINT(CONT_PREFIX "\n");
+    
+    INTERNAL_PRINT(CONT_PREFIX "---------------------------------------------------------------\n");
+
+    for (size_t i = 0; i < length; i++) {
+		if(i % 16 == 0) {
+			INTERNAL_PRINT(CONT_PREFIX "%p: ", p + i);
+		}
+		if(escape_sequence[p[i]] == NULL) {
+        	INTERNAL_PRINT(CONT_PREFIX "%c  ", p[i]);
+		} else {
+			INTERNAL_PRINT(CONT_PREFIX "%s ", escape_sequence[p[i]]);
+		}
+        if ((i + 1) % 16 == 0) {
+            INTERNAL_PRINT(CONT_PREFIX "\n");
+        }
+    }
+    INTERNAL_PRINT(CONT_PREFIX "\n");
+}
+
+// __GNUC__
+#elif defined(__GNUC__)
+
 #	define INTERNAL_PRINT printf
 #	define STD_PREFIX 
 #	define CONT_PREFIX
-#endif // __KERNEL__
+
+#	include <stddef.h>
+#	include <stdio.h>
+#	include <malloc.h>
+
+#	include <execinfo.h>
+#	define __USE_GNU
+#	include <dlfcn.h>
+#	include <stddef.h>
 
 static const char *getCaller(void) {
     void *callstack[4];
     const int maxFrames = sizeof(callstack) / sizeof(callstack[0]);
-
     Dl_info info;
-
     backtrace(callstack, maxFrames);
-
     if (dladdr(callstack[2], &info) && info.dli_sname != NULL) {
         return info.dli_sname;
     } else {
         return "<?>";
     }
 }
-#else
-static const char *getCaller(void) {
-	return "<unimplemented>";
-}
-#endif // __GNUC__
-
-#include <stddef.h>
-#include <stdio.h>
-#ifdef __KERNEL__
-#include <linux/slab.h>
-#define malloc_usable_size ksize
-#else 
-#include <malloc.h>
-#endif // not __KERNEL__
-static const char *escape_sequence[256] = {
-	['\a'] = "\\a",
-	['\b'] = "\\b",
-	['\f'] = "\\f",
-	['\n'] = "\\n",
-	['\r'] = "\\r",
-	['\t'] = "\\t",
-	['\v'] = "\\v",
-	['\\'] = "\\\\",
-	['\''] = "\\'",
-	['\"'] = "\\\"",
-	['\?'] = "\\?",
-	['\0'] = "\\0",	
-	[128 ... 255] = "??",	
-};
 
 size_t strlen_probe(char *str) {
 	size_t usuable_memory = malloc_usable_size(str);
@@ -301,5 +379,19 @@ static void dbgmem(void *ptr) {
     }
     INTERNAL_PRINT(CONT_PREFIX "\n");
 }
+
+// unknown platform
+#else 
+
+#	define INTERNAL_PRINT printf
+#	define STD_PREFIX 
+#	define CONT_PREFIX
+static const char *getCaller(void) {
+	return "<unimplemented>";
+}
+
+#endif // implementation selection
+
+#endif // DEBUG
 
 #endif // DEBUG_H
